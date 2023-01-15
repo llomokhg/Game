@@ -1,5 +1,5 @@
 from random import randrange
-import all_else
+import areas
 from generate_name import generate
 
 
@@ -12,11 +12,6 @@ class Board:
         self.cell_size = cell
         self.width = W // cell
         self.height = H // cell
-
-    def set_view(self, left, top, cell_size):
-        self.left = left
-        self.top = top
-        self.cell_size = cell_size
 
     def get_cell(self, pos):
         pos = list(pos)
@@ -44,12 +39,12 @@ class Board:
             except IndexError:
                 pass
         if len(need_to_paint) >= 200:
-            all_else.countries[country_number].add_area(
-                all_else.Area(all_else.countries[country_number], local_region_number, need_to_paint,
-                              generate(),
-                              (randrange(100, 155),
-                               randrange(100, 155),
-                               randrange(100, 155))))
+            areas.countries[country_number].add_area(
+                areas.Area(areas.countries[country_number], local_region_number, need_to_paint,
+                           generate(),
+                           (randrange(100, 155),
+                            randrange(100, 155),
+                            randrange(100, 155))))
 
             local_region_number += 1
         else:
@@ -76,11 +71,22 @@ class Board:
             local_region_number = self.make_region((dot_x + randrange(-30, 30),
                                                     dot_y + randrange(-30, 30)), local_region_number, country_number,
                                                    300 + randrange(-30, 30))
-        return dot_y, dot_x
 
     def make_the_world(self, number_of_regions=7, number_of_countries=7):
-        for country_number in range(number_of_countries):
-            all_else.countries.append(all_else.Country(generate(), country_number,
-                                                       (randrange(100, 255), randrange(100, 255), randrange(100, 255))))
-            center = self.make_country(number_of_regions + randrange(-3, 2), country_number)
-            all_else.countries[country_number].set_center(center)
+        country_number = 0
+        while country_number < number_of_countries:
+            areas.countries.append(areas.Country(generate(), country_number,
+                                                 (randrange(100, 255), randrange(100, 255), randrange(100, 255))))
+            self.make_country(number_of_regions + randrange(-3, 2), country_number)
+
+            for area in areas.countries[country_number].areas:
+                area.set_neighbors(self)
+            areas.countries[country_number].set_neighbors()
+
+            if not areas.countries[country_number].neighbors and country_number != 0:
+                for area in areas.countries[country_number].areas:
+                    for point in area.points:
+                        self.board[point[0]][point[1]] = 0
+                areas.countries = areas.countries[:-1]
+                country_number -= 1
+            country_number += 1
