@@ -1,3 +1,5 @@
+import npc
+
 
 class Building:
     def get_class(self):  # название класса
@@ -18,8 +20,8 @@ class University(Building):
             for _ in range(self.data['level']):  # в зависимости от уровня университета, увеличивается
                 # количество выпускаемых правителей
                 if not self.area.country.AI:
-                    governors.append(Governor(self.area))  # создание правителей
-                    self.area.governor = governors[-1]
+                    self.area.governors.append(npc.Governor(self.area))  # создание правителей
+                    self.area.governor = self.area.governors[-1]
 
         self.year += 1
         return 'science', 'science', self.data['science']
@@ -131,7 +133,7 @@ class ArmyAcademy(Building):
             if self.year % self.data['years'] == 0:
                 for _ in range(self.data['level']):
                     # создание объекта класса "Генерал"
-                    self.area.country.generals.append(General(self.area))
+                    self.area.country.generals.append(npc.General(self.area))
             self.year += 1
             return 'science', '', -self.data['science']
         return 'science', '', 0
