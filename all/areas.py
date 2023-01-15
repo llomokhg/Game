@@ -1,8 +1,7 @@
 from random import randrange, random, choice
+import npc
 
-BASE_CHARACTERISTICS = {}
 level = 1  # уровень сложности
-governors = []  # все правители у ИГРОКА
 countries = []
 
 
@@ -16,7 +15,7 @@ class Area:  # область
         self.buildings = []
         self.governor = None
         self.neighbors = []
-        # self.set_neighbors()
+        self.damage = 0
 
         lev = level  # уровень сложности не влияет на ботов
         if self.country.AI:
@@ -28,7 +27,7 @@ class Area:  # область
                               'animals': [0.9, 5_000, 15_000], 'people': [0.95, 1000, 70_000]}
         self.characteristics = {'science': round(50 / lev), 'wood': round(500 / lev), 'animals': 0,
                                 'extracted_iron': round(50 / lev), 'extracted_gold': round(35 / lev),
-                                'processed_iron': round(50 / lev), 'processed_gold': round(40 / lev)}
+                                'processed_iron': round(50 / lev)}
         # базовое количество добываемых ресурсов (необходимые для построек) определяется уровнем (больше уровень -
         # меньше базовых ресурсов)
 
@@ -88,8 +87,11 @@ class Area:  # область
             # первые три здания одного типа в стране - бесплатно
             if [i.get_class() for x in self.country.areas for i in x.buildings].count(building.get_class()) <= 2:
                 self.buildings.append(building)
-                print(f'Построено: {building.get_class()} в {self.name}')
-            elif all([self.country.characteristics[i] >= k for i, k in building.price.items()]):  # достаточно ресурсов
+            elif all([self.country.characteristics[i] >= round(k * 1.1) for i, k in building.price.items()]) and \
+                    all([len([x for x in self.country.areas if x.characteristics[key] >
+                                                               round(i * 1.1) // len(self.country.areas)])
+                         for key, i in building.price.items()]):  # достаточно ресурсов
+
                 for key, i in building.price.items():  # проход по необходимым ресурсам
                     if self.characteristics[key] < i:  # в области недостаточно ресурсов
                         i -= self.characteristics[key]
@@ -97,15 +99,21 @@ class Area:  # область
 
                         # все остальное берем из ресурсов страны (из всех областей поровну), но в большем количестве
                         for area in self.country.areas:
-                            area.characteristics[key] -= round(i * 1.1) // len([x for x in self.country.areas
-                                                                                if x.characteristics[key]
-                                                                                > round(i * 1.1) //
-                                                                                len(self.country.areas)])
+
+                            if len([x for x in self.country.areas if x.characteristics[key] > round(i * 1.1) //
+                                                                     len(self.country.areas)]) != 0 \
+                                    and area.characteristics[key] > round(i * 1.1) // len([x for x in self.country.areas
+                                                                                           if x.characteristics[key]
+                                                                                              > round(i * 1.1) //
+                                                                                              len(self.country.areas)]):
+                                area.characteristics[key] -= round(i * 1.1) // len([x for x in self.country.areas
+                                                                                    if x.characteristics[key]
+                                                                                    > round(i * 1.1) //
+                                                                                    len(self.country.areas)])
                     else:
                         self.characteristics[key] -= i  # ресурсов этого типа достаточно - вычитаем цену
 
                 self.buildings.append(building)
-                print(f'построено {building.get_class()} в {self.name}')
             else:
                 return 'недостаточно ресурсов'  # сообщение об ошибке
         else:
@@ -114,15 +122,20 @@ class Area:  # область
     def del_building(self, building):
         self.buildings = self.buildings[:self.buildings.index(building)] + self.buildings[
                                                                            self.buildings.index(building) + 1:]
+        for k, i in building.price.items():
+            self.characteristics[k] += i // 2
 
     def get_characteristics(self):
         return self.characteristics
 
     # смена страны, в составе которой находится область
-    def change_country(self, country):
-        self.country.del_area(self)
+    def change_country(self, country, board):
+        self.country.del_area(self, board)
         self.country = country
         country.add_area(self)
+        self.number = len(country.areas) - 1
+        for point in self.points:
+            board.board[point[0]][point[1]] = (country.number, self.number)
         # при переходе области из состава одной страны в другую кол-во ресурсов сокращается
         for resource in list(self.characteristics.keys()):
             self.characteristics[resource] = round(self.characteristics[resource] * 0.95)
@@ -139,15 +152,21 @@ class Country:
         self.contracts = {}
         self.generals = []
         self.neighbors = []
+        self.center = None
         self.AI = None
 
         if bot:
-            self.AI = CountryAI(self)
+            self.AI = npc.CountryAI(self)
+        else:
+            self.governors = []
+
+    def set_center(self, center):
+        self.center = center
 
     def set_neighbors(self):
         for area in self.areas:
             for neighbor in area.neighbors:
-                if neighbor.country not in self.neighbors:
+                if neighbor.country not in self.neighbors and neighbor.country != self:
                     self.neighbors.append(neighbor.country)
 
     def add_area(self, area):  # добавление территории в страну
@@ -161,17 +180,21 @@ class Country:
                 self.characteristics[ind] += area.characteristics[ind]
             self.characteristics['soil'] //= len(self.areas)
 
-    def del_area(self, area):  # удалить область из страны (захватили)
+    def del_area(self, area, board):  # удалить область из страны (захватили)
         self.areas = self.areas[:self.areas.index(area)] + self.areas[self.areas.index(area) + 1:]
+        for another_area in self.areas:
+            if another_area.number > area.number:
+                for point in another_area.points:
+                    board.board[point[0]][point[1]] = (self.number, another_area.number - 1)
         for ind, el in area.characteristics:
             self.characteristics[ind] -= area.characteristics[ind]
 
     def next_turn(self):  # следующий ход
-        # если эта страна - бот, то ИИ делает ход
         for pact in list(self.pacts.keys()):
             if self.pacts[pact]:
                 self.pacts[pact] -= 1
 
+        # если эта страна - бот, то ИИ делает ход
         if self.AI:
             self.AI.next_turn()
 
@@ -200,29 +223,53 @@ class Country:
                 len(self.areas))
 
     def make_pact(self, country):
-        if country not in list(self.pacts.keys()) or self.pacts[country] == 0:
+        if (country not in list(self.pacts.keys()) or self.pacts[country] == 0 and (country not in
+                list(self.contracts.keys()) or self.contracts[country] != 'war')):
             # разница сил небольшая
             if (self.power_measuring() < country.power_measuring() or
-                    abs(country.power_measuring() - self.power_measuring()) < self.power_measuring() // 2):
+                    abs(country.power_measuring() - self.power_measuring()) < self.power_measuring() // 20):
                 self.pacts[country] = 15
+                country.pacts[self] = 15
+                self.contracts[country] = 'peace'
+                country.contracts[self] = 'peace'
 
     def make_union(self, country):
         # если союз не заключен и нет противоречий в союзах
-        if country not in list(self.contracts.keys()) and all([self.contracts[i] == country.contracts[i] for i, k in
-                                                               self.contracts if i in list(country.unions.keys())]):
+        if (country not in list([k for k, i in self.contracts.items() if i != 'peace']) and
+                self not in list([k for k, i in country.contracts.items() if i != 'peace']) and
+                all([i == country.contracts[k] or i == 'peace' or country.contracts[k] == 'peace' for k, i in
+                     self.contracts.items() if k in list(country.contracts.keys())])):
             self.contracts[country] = 'union'
             country.contracts[self] = 'union'
             # союзник союзника - союзник, а враг союзника - враг => добавляем союзников и противников союзникам
-            for c, cond in country.contracts:
-                self.contracts[c] = cond
-            for c, cond in self.contracts:
-                country.contracts[c] = cond
+            for c, cond in country.contracts.items():
+                if cond == 'war' and (c not in list(self.contracts.keys()) or self.contracts[c] != 'war'):
+                    self.start_war(c)
+            for c, cond in self.contracts.items():
+                if cond == 'war' and (c not in list(country.contracts.keys()) or country.contracts[c] != 'war'):
+                    country.start_war(c)
 
     def start_war(self, country):
-        if country not in list(self.contracts.keys()) + list(self.pacts.keys()):
+        if (country not in [k for k, i in self.contracts.items() if i != 'peace'] +
+                [k for k, i in self.pacts.items() if i > 0] and
+                self not in [k for k, i in country.contracts.items() if i != 'peace'] +
+                [k for k, i in country.pacts.items() if i > 0]):
             self.contracts[country] = 'war'
             country.contracts[self] = 'war'
-            for c in [k for k, i in self.contracts if i == 'union']:
-                c.contracts[country] = 'war'
-            for c in [k for k, i in country.contracts if i == 'union']:
-                c.contracts[self] = 'war'
+            for c in [k for k, i in self.contracts.items() if i == 'union']:
+                if country not in list(c.contracts.keys()) or c.contracts[country] != 'war':
+                    c.start_war(country)
+            for c in [k for k, i in country.contracts.items() if i == 'union']:
+                if self not in list(c.contracts.keys()) or c.contracts[self] != 'war':
+                    c.start_war(self)
+
+    def make_peace(self, country):
+        if self.AI:
+            if self.power_measuring() * 1.2 <= country.power_measuring():
+                self.contracts[country] = 'peace'  # заключение мира равнозначно подписанию пакта
+                self.pacts[country] = 15
+
+                country.contracts[self] = 'peace'
+                country.pacts[self] = 15
+        else:
+            pass  # нужно получить ответ от игрока
