@@ -2,9 +2,11 @@ import sys
 import buttons
 import pygame
 import map
-import all_else
+import npc
+import buildings
 import scene
-from random import random
+import areas
+from random import random, randrange
 
 
 class App:
@@ -14,8 +16,11 @@ class App:
         self.board = None
         self.now_selected = None
         self.layer = None
+        self.is_egg = random() <= 0.1
         self.windows = None
         self.main_screen = None
+        self.number = 0
+        self.balloons = pygame.sprite.Group()
         self.saves = []
         pygame.init()
         pygame.mixer.music.load('start_fon_music.mp3')
@@ -43,10 +48,8 @@ class App:
         background.rect.x, background.rect.y = 0, 0
         background_egg.rect.x, background_egg.rect.y = 0, 0
 
-        is_egg = random() <= 0.05
-
         all_sprites.add(background)
-        if is_egg:
+        if self.is_egg:
             all_sprites.add(background_egg)
 
         start_button = buttons.Button((self.size[0] // 2 - 115, 280), (255, 70), (0, 179, 88), (35, 139, 73),
@@ -65,14 +68,23 @@ class App:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if start_button.click_checking(event.pos):
-                        pygame.mixer.music.load('fon_music.mp3')
-                        pygame.mixer.music.play()
-                        return self.make_map()
+                        if len(self.saves) < 5:
+                            pygame.mixer.music.load('fon_music.mp3')
+                            pygame.mixer.music.play(-1)
+                            return self.make_map()
                     elif load_button.click_checking(event.pos):
                         return self.load_screen()
-                    if is_egg:
+                    if self.is_egg:
                         if egg_button.click_checking(event.pos):
-                            pass
+                            for _ in range(randrange(0, 5)):
+                                while True:
+                                    balloon = pygame.sprite.Sprite()
+                                    balloon.image = pygame.image.load('balloon.png')
+                                    balloon.rect = balloon.image.get_rect()
+                                    balloon.rect.x, balloon.rect.y = randrange(30, 970), randrange(650, 700)
+                                    if not pygame.sprite.spritecollide(balloon, self.balloons, False):
+                                        self.balloons.add(balloon)
+                                        break
                 elif event.type == pygame.MOUSEMOTION:
                     start_button.holding(event.pos)
                     load_button.holding(event.pos)
@@ -82,8 +94,11 @@ class App:
                 all_sprites.draw(self.screen)
                 start_button.drawing(self.screen)
                 load_button.drawing(self.screen)
-                if is_egg:
-                    egg_button.drawing(self.screen)
+                for balloon in self.balloons:
+                    if balloon.rect.y > 0:
+                        balloon.rect.y -= 200 * 5000/(balloon.rect.y ** 2)
+                    else:
+                        balloon.rect.y -= 10
 
                 earth.image = pygame.image.load("earth.jpg")
                 cropped.blit(earth.image, (0, 0), (30 + 133 * x, 25 + 158 * y, 140, 140))
@@ -97,6 +112,10 @@ class App:
                     y -= 1
                 if y == -1:
                     y = 2
+
+                if self.is_egg:
+                    egg_button.drawing(self.screen)
+                    self.balloons.draw(self.screen)
 
             pygame.display.flip()
         pygame.quit()
@@ -122,20 +141,72 @@ class App:
                 for load_button_number in range(len(load_buttons)):
                     if event.type == pygame.MOUSEBUTTONDOWN:
                         if load_buttons[load_button_number].click_checking(event.pos):
-                            all_else.countries = []
-                            self.board = map.Board(*self.size)
-                            self.board.board = self.saves[load_button_number][1]
-                            for country in self.saves[load_button_number][0]:
-                                all_else.countries.append(all_else.Country(country['name'], country['number'],
-                                                                           country['color']))
-                                all_else.countries[country['number']].center = country['center']
-                                all_else.countries[country['number']].contracts = country['AI']
-                                for region in country['areas']:
-                                    all_else.countries[country['number']].\
-                                        add_area(all_else.Area(all_else.countries[country['number']],
-                                                               region['number'], region['points'],
-                                                               region['name'], region['color']))
-                            return self.main_screen.main_screen()
+                            if load_button_number < len(self.saves):
+                                pygame.mixer.music.load('fon_music.mp3')
+                                pygame.mixer.music.play(-1)
+                                areas.countries = []
+                                self.board = map.Board(*self.size)
+                                self.board.board = self.saves[load_button_number][1]
+                                for country in self.saves[load_button_number][0]:
+                                    areas.countries.append(areas.Country(country['name'], country['number'],
+                                                                         country['color']))
+                                    areas.countries[country['number']].AI = country['AI']
+                                    areas.countries[country['number']].pacts = country['pacts']
+                                    areas.countries[country['number']].contracts = country['contracts']
+                                    areas.countries[country['number']].generals = country['generals']
+                                    for region in country['areas']:
+                                        areas.countries[country['number']]. \
+                                            add_area(areas.Area(areas.countries[country['number']],
+                                                                region['number'], region['points'],
+                                                                region['name'], region['color']))
+                                        areas.countries[country['number']].areas[region['number']].governor = \
+                                            npc.Governor(areas.countries[country['number']].areas[region['number']])
+                                        if region['governor']:
+                                            areas.countries[country['number']].areas[region['number']]. \
+                                                governor.characteristics = region['governor']
+                                        areas.countries[country['number']].areas[region['number']].characteristics = \
+                                            region['characteristics']
+                                        for building in region['buildings']:
+                                            if building['name'] == 'University':
+                                                year = building['year']
+                                                data = building['data']
+                                                building = buildings.University(areas.countries[country['number']].
+                                                                                areas[region['number']])
+                                                building.year = year
+                                                building.data = data
+                                            elif building['name'] == 'ArmyAcademy':
+                                                year = building['year']
+                                                data = building['data']
+                                                building = buildings.University(areas.countries[country['number']].
+                                                                                areas[region['number']])
+                                                building.year = year
+                                                building.data = data
+                                            elif building['name'] == 'MetallurgicalPlant':
+                                                data = building['data']
+                                                building = buildings.MetallurgicalPlant(areas.countries[
+                                                                                            country['number']]
+                                                                                        .areas[region['number']])
+                                                building.data = data
+                                            elif building['name'] == 'Sawmill':
+                                                data = building['data']
+                                                building = buildings.Sawmill(areas.countries[country['number']].
+                                                                             areas[region['number']])
+                                                building.data = data
+                                            elif building['name'] == 'IronMine':
+                                                data = building['data']
+                                                building = buildings.IronMine(areas.countries[country['number']].
+                                                                              areas[region['number']])
+                                                building.data = data
+                                            elif building['name'] == 'GoldMine':
+                                                data = building['data']
+                                                building = buildings.GoldMine(areas.countries[country['number']].
+                                                                              areas[region['number']])
+                                                building.data = data
+                                            areas.countries[country['number']].areas[region['number']] \
+                                                .buildings.append(building)
+                                self.number = load_button_number
+                                self.main_screen.board = self.board
+                                return self.main_screen.main_screen()
                     elif event.type == pygame.MOUSEMOTION:
                         load_buttons[load_button_number].holding(event.pos)
 
@@ -166,9 +237,14 @@ class App:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if exit_button.click_checking(event.pos):
                         pygame.mixer.music.load('start_fon_music.mp3')
-                        pygame.mixer.music.play()
+                        pygame.mixer.music.play(-1)
                         save = self.main_screen.save()
-                        self.saves.append(save)
+                        if len(self.saves) < 5:
+                            if self.number != len(self.saves):
+                                self.saves[self.number] = save
+                            else:
+                                self.saves.append(save)
+                            self.number = len(self.saves)
                         return self.start_screen()
                     elif continue_button.click_checking(event.pos):
                         return self.main_screen.main_screen()
@@ -184,10 +260,10 @@ class App:
             pygame.display.flip()
 
     def make_map(self):
-        all_else.countries = []
+        areas.countries = []
         self.board = map.Board(*self.size)
         self.board.make_the_world(number_of_countries=20, number_of_regions=10)
-        self.now_selected = all_else.countries[0].areas[0]
+        self.now_selected = areas.countries[0].areas[0]
         self.layer = 'countries'
         self.windows = []
         self.main_screen = scene.Main_Scene(self)
